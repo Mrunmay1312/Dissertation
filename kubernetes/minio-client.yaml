@@ -1,0 +1,26 @@
+# kubernetes/minio-client.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: minio-client
+  namespace: fraudshield
+spec:
+  containers:
+  - name: mc
+    image: minio/mc:RELEASE.2023-10-25T07-38-22Z
+    command: ["/bin/sh", "-c", "tail -f /dev/null"]
+    env:
+    - name: MC_HOST_myminio
+      value: http://minio:minio123@minio-service:9000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-client
+  namespace: fraudshield
+spec:
+  selector:
+    name: minio-client
+  ports:
+  - port: 9000
+    targetPort: 9000

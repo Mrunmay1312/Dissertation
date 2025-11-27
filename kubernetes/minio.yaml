@@ -1,0 +1,133 @@
+# Dissertation/kubernetes/minio.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: minio-pvc
+  namespace: fraudshield
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: fraudshield
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+      - name: minio
+        image: minio/minio:RELEASE.2023-10-25T06-33-25Z
+        args:
+        - server
+        - /data
+        - --console-address
+        - :9001
+        ports:
+        - containerPort: 9000
+          name: minio
+        - containerPort: 9001
+          name: console
+        env:
+        - name: MINIO_ROOT_USER
+          value: "minio"
+        - name: MINIO_ROOT_PASSWORD
+          value: "minio123"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        volumeMounts:
+        - name: minio-storage
+          mountPath: /data
+        livenessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /minio/health/ready
+            port: 9000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: minio-storage
+        persistentVolumeClaim:
+          claimName: minio-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-service
+  namespace: fraudshield
+  labels:
+    app: minio
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: minio
+      protocol: TCP
+      port: 9000
+      targetPort: 9000
+    - name: console
+      protocol: TCP
+      port: 9001
+      targetPort: 9001
+  type: ClusterIP
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-setup
+  namespace: fraudshield
+spec:
+  template:
+    spec:
+      containers:
+      - name: mc
+        image: minio/mc:RELEASE.2023-10-25T07-38-22Z
+        command:
+        - /bin/sh
+        - -c
+        - |
+          echo "Waiting for MinIO to be ready..."
+          until (mc config host add myminio http://minio-service:9000 minio minio123) do
+            echo 'Waiting for MinIO...'
+            sleep 5
+          done
+          
+          echo "Creating buckets..."
+          mc mb myminio/fraud-data --ignore-existing
+          mc mb myminio/fraud-models --ignore-existing
+          mc mb myminio/processed-data --ignore-existing
+          mc mb myminio/backup --ignore-existing
+          mc mb myminio/logs --ignore-existing
+          
+          echo "Bucket creation completed!"
+          echo "Listing buckets:"
+          mc ls myminio
+        env:
+        - name: MC_HOST_myminio
+          value: http://minio:minio123@minio-service:9000
+      restartPolicy: OnFailure

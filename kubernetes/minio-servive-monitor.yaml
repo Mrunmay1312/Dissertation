@@ -1,0 +1,17 @@
+# kubernetes/minio-service-monitor.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: minio-service-monitor
+  namespace: fraudshield
+  labels:
+    app: minio
+spec:
+  selector:
+    matchLabels:
+      app: minio
+  endpoints:
+  - port: minio
+    path: /minio/v2/metrics/cluster
+    interval: 30s
+    scrapeTimeout: 10s

@@ -1,0 +1,125 @@
+# kubernetes/alert-service.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-service
+  labels:
+    app: alert-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: alert-service
+  template:
+    metadata:
+      labels:
+        app: alert-service
+    spec:
+      containers:
+      - name: alert-service
+        image: fraudshield/alert-service:latest
+        ports:
+        - containerPort: 5000
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: SMTP_SERVER
+          value: "smtp.gmail.com"
+        - name: SMTP_PORT
+          value: "587"
+        - name: SENDER_EMAIL
+          value: "fraud-alerts@yourcompany.com"
+        - name: SENDER_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: alert-service-secrets
+              key: smtp-password
+        - name: SLACK_WEBHOOK_URL
+          valueFrom:
+            secretKeyRef:
+              name: alert-service-secrets
+              key: slack-webhook-url
+        - name: MINIO_URL
+          value: "http://minio-service:9000"
+        - name: MINIO_ACCESS_KEY
+          value: "minio"
+        - name: MINIO_SECRET_KEY
+          value: "minio123"
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /api/alerts/health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/alerts/health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+      volumes:
+      - name: config-volume
+        configMap:
+          name: alert-service-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-service
+spec:
+  selector:
+    app: alert-service
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 5000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alert-service-config
+data:
+  config.yaml: |
+    alerts:
+      email:
+        enabled: true
+        recipients:
+          - "security-team@yourcompany.com"
+          - "fraud-analysis@yourcompany.com"
+        templates:
+          high_risk: "High risk fraud detected: Transaction {transaction_id}"
+          medium_risk: "Suspicious transaction: Transaction {transaction_id}"
+      slack:
+        enabled: false
+        channel: "#fraud-alerts"
+      thresholds:
+        high_risk: 0.8
+        medium_risk: 0.6
+    logging:
+      level: "INFO"
+      format: "json"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alert-service-secrets
+type: Opaque
+data:
+  # echo -n "your-smtp-password" | base64
+  smtp-password: eW91ci1zbXRwLXBhc3N3b3Jk
+  # echo -n "https://hooks.slack.com/services/..." | base64
+  slack-webhook-url: aHR0cHM6Ly9ob29rcy5zbGFjay5jb20vc2VydmljZXMvLi4u

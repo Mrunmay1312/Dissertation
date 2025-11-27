@@ -1,0 +1,42 @@
+# kubernetes/model-service.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: model-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: model-service
+  template:
+    metadata:
+      labels:
+        app: model-service
+    spec:
+      containers:
+      - name: model-service
+        image: fraudshield/model-service:latest
+        ports:
+        - containerPort: 5000
+        volumeMounts:
+        - name: model-storage
+          mountPath: /app/models
+        env:
+        - name: MODEL_PATH
+          value: "/app/models/fraud_model.pkl"
+      volumes:
+      - name: model-storage
+        persistentVolumeClaim:
+          claimName: model-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: model-service
+spec:
+  selector:
+    app: model-service
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000

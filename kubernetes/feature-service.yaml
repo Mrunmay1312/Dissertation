@@ -1,0 +1,98 @@
+# kubernetes/feature-service.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feature-service
+  labels:
+    app: feature-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: feature-service
+  template:
+    metadata:
+      labels:
+        app: feature-service
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "5000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: feature-service
+        image: fraudshield/feature-service:latest
+        ports:
+        - containerPort: 5000
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: LOG_LEVEL
+          value: "INFO"
+        - name: DATA_SERVICE_URL
+          value: "http://data-service:80"
+        - name: MODEL_SERVICE_URL
+          value: "http://model-service:80"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /api/features/health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/features/health
+            port: 5000
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config
+      volumes:
+      - name: config-volume
+        configMap:
+          name: feature-service-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: feature-service
+spec:
+  selector:
+    app: feature-service
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80
+      targetPort: 5000
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: feature-service-config
+data:
+  config.yaml: |
+    features:
+      numerical:
+        - amount
+        - transaction_count_24h
+        - avg_amount_7d
+        - distance_from_home
+      categorical:
+        - hour
+        - day_of_week
+        - is_weekend
+      derived:
+        - amount_log
+        - transaction_frequency
+    thresholds:
+      high_risk_amount: 1000
+      suspicious_hours: [0, 1, 2, 3, 4, 5]
