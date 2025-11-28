@@ -1,0 +1,145 @@
+version: '3.8'
+
+services:
+  # MongoDB
+  mongodb:
+    image: mongo:5.0
+    container_name: fraudshield-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=fraud_detection
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - fraudshield-network
+
+  # MinIO
+  minio:
+    image: minio/minio:latest
+    container_name: fraudshield-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      - MINIO_ROOT_USER=minio
+      - MINIO_ROOT_PASSWORD=minio123
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - fraudshield-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  # Data Service
+  data-service:
+    build: ./data-service
+    container_name: fraudshield-data-service
+    ports:
+      - "5001:5000"
+    environment:
+      - MONGO_URI=mongodb://mongodb:27017/fraud_detection
+      - MINIO_URL=http://minio:9000
+      - MINIO_ACCESS_KEY=minio
+      - MINIO_SECRET_KEY=minio123
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - mongodb
+      - minio
+    networks:
+      - fraudshield-network
+    volumes:
+      - ./data-service:/app
+
+  # Feature Service
+  feature-service:
+    build: ./feature-service
+    container_name: fraudshield-feature-service
+    ports:
+      - "5002:5000"
+    environment:
+      - DATA_SERVICE_URL=http://data-service:5000
+      - MODEL_SERVICE_URL=http://model-service:5000
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - data-service
+    networks:
+      - fraudshield-network
+    volumes:
+      - ./feature-service:/app
+
+  # Model Service
+  model-service:
+    build: ./model-service
+    container_name: fraudshield-model-service
+    ports:
+      - "5003:5000"
+    environment:
+      - MINIO_URL=http://minio:9000
+      - MINIO_ACCESS_KEY=minio
+      - MINIO_SECRET_KEY=minio123
+      - DATA_SERVICE_URL=http://data-service:5000
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - minio
+      - data-service
+    networks:
+      - fraudshield-network
+    volumes:
+      - ./model-service:/app
+      - model_storage:/app/models
+
+  # Alert Service
+  alert-service:
+    build: ./alert-service
+    container_name: fraudshield-alert-service
+    ports:
+      - "5004:5000"
+    environment:
+      - SMTP_SERVER=smtp.gmail.com
+      - SMTP_PORT=587
+      - SENDER_EMAIL=fraud-alerts@yourcompany.com
+      - SENDER_PASSWORD=your-email-password
+      - MINIO_URL=http://minio:9000
+      - MINIO_ACCESS_KEY=minio
+      - MINIO_SECRET_KEY=minio123
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - minio
+    networks:
+      - fraudshield-network
+    volumes:
+      - ./alert-service:/app
+
+  # Initialization Service
+  init-minio:
+    image: minio/mc:latest
+    container_name: fraudshield-init-minio
+    depends_on:
+      minio:
+        condition: service_healthy
+    command: >
+      /bin/sh -c "
+      until (/usr/bin/mc config host add myminio http://minio:9000 minio minio123) do echo 'Waiting for MinIO...' && sleep 5; done;
+      /usr/bin/mc mb myminio/fraud-data --ignore-existing;
+      /usr/bin/mc mb myminio/fraud-models --ignore-existing;
+      /usr/bin/mc mb myminio/processed-data --ignore-existing;
+      /usr/bin/mc mb myminio/backup --ignore-existing;
+      /usr/bin/mc mb myminio/logs --ignore-existing;
+      echo 'MinIO buckets created successfully!'
+      "
+    networks:
+      - fraudshield-network
+
+volumes:
+  mongodb_data:
+  minio_data:
+  model_storage:
+
+networks:
+  fraudshield-network:
+    driver: bridge

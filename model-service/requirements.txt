@@ -15,9 +15,6 @@ pandas==2.1.1
 numpy==1.25.2
 scipy==1.11.2
 
-# Model Serialization
-pickle5==0.0.11
-
 # File Storage
 minio==7.1.16
 boto3==1.28.62
